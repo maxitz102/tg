@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read and write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Allow Cloud Functions to create/update user documents
+      allow create, update: if request.auth != null && 
+        request.auth.token.role in ['admin', 'manager'];
+    }
+    
+    // Users can read and write their own schedules
+    match /schedules/{scheduleId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.uid == request.resource.data.userId);
+    }
+    
+    // Users can read and write their own timerecords
+    match /timerecords/{recordId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || 
+         request.auth.uid == request.resource.data.userId);
+    }
+    
+    // Managers and admins can read all data
+    match /{document=**} {
+      allow read: if request.auth != null && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['manager', 'admin']);
+    }
+    
+    // Only admins can write to all documents
+    match /{document=**} {
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+  }
+}
