@@ -1,0 +1,8 @@
+-- Add hours_saldo field to profiles table
+ALTER TABLE public.profiles 
+ADD COLUMN hours_saldo NUMERIC(8,2) DEFAULT 0.00;
+
+-- Update existing profiles to have 0.00 hours_saldo
+UPDATE public.profiles 
+SET hours_saldo = 0.00 
+WHERE hours_saldo IS NULL;

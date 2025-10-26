@@ -1,0 +1,65 @@
+-- Create function to call the Edge Function
+CREATE OR REPLACE FUNCTION public.calculate_hours_saldo()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  user_id_to_update UUID;
+BEGIN
+  -- Determine the user_id based on the table
+  IF TG_TABLE_NAME = 'schedules' THEN
+    user_id_to_update := NEW.user_id;
+  ELSIF TG_TABLE_NAME = 'timerecords' THEN
+    user_id_to_update := NEW.user_id;
+  END IF;
+
+  -- Call the Edge Function asynchronously
+  PERFORM
+    net.http_post(
+      url := current_setting('app.supabase_url') || '/functions/v1/calculate-hours-saldo',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer ' || current_setting('app.supabase_service_role_key')
+      ),
+      body := jsonb_build_object('user_id', user_id_to_update)
+    );
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+-- Create triggers for schedules table
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_schedules_insert
+  AFTER INSERT ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_schedules_update
+  AFTER UPDATE ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_schedules_delete
+  AFTER DELETE ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+-- Create triggers for timerecords table
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_timerecords_insert
+  AFTER INSERT ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_timerecords_update
+  AFTER UPDATE ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+CREATE OR REPLACE TRIGGER trigger_calculate_saldo_timerecords_delete
+  AFTER DELETE ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.calculate_hours_saldo();
+
+-- Enable the http extension for making HTTP requests
+CREATE EXTENSION IF NOT EXISTS http;

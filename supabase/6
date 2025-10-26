@@ -1,0 +1,115 @@
+-- Create function to calculate hours saldo directly in the database
+CREATE OR REPLACE FUNCTION public.calculate_user_hours_saldo(user_id_param UUID)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  total_scheduled_hours NUMERIC := 0;
+  total_worked_hours NUMERIC := 0;
+  saldo NUMERIC := 0;
+BEGIN
+  -- Calculate total scheduled hours (Soll-Zeiten)
+  SELECT COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time)) / 3600), 0)
+  INTO total_scheduled_hours
+  FROM public.schedules
+  WHERE user_id = user_id_param;
+
+  -- Calculate total worked hours (Ist-Zeiten)
+  SELECT COALESCE(SUM(total_hours), 0)
+  INTO total_worked_hours
+  FROM public.timerecords
+  WHERE user_id = user_id_param
+    AND check_out IS NOT NULL;
+
+  -- Calculate saldo (Ist-Zeiten - Soll-Zeiten)
+  saldo := total_worked_hours - total_scheduled_hours;
+
+  -- Update the user's hours_saldo in profiles table
+  UPDATE public.profiles
+  SET hours_saldo = ROUND(saldo, 2)
+  WHERE id = user_id_param;
+
+  RETURN ROUND(saldo, 2);
+END;
+$$;
+
+-- Create trigger function that calls the calculation
+CREATE OR REPLACE FUNCTION public.trigger_calculate_hours_saldo()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  user_id_to_update UUID;
+BEGIN
+  -- Determine the user_id based on the table and operation
+  IF TG_TABLE_NAME = 'schedules' THEN
+    IF TG_OP = 'DELETE' THEN
+      user_id_to_update := OLD.user_id;
+    ELSE
+      user_id_to_update := NEW.user_id;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'timerecords' THEN
+    IF TG_OP = 'DELETE' THEN
+      user_id_to_update := OLD.user_id;
+    ELSE
+      user_id_to_update := NEW.user_id;
+    END IF;
+  END IF;
+
+  -- Calculate and update the saldo
+  PERFORM public.calculate_user_hours_saldo(user_id_to_update);
+
+  -- Return the appropriate record
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
+END;
+$$;
+
+-- Create triggers for schedules table
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_schedules_insert ON public.schedules;
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_schedules_update ON public.schedules;
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_schedules_delete ON public.schedules;
+
+CREATE TRIGGER trigger_calculate_saldo_schedules_insert
+  AFTER INSERT ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+CREATE TRIGGER trigger_calculate_saldo_schedules_update
+  AFTER UPDATE ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+CREATE TRIGGER trigger_calculate_saldo_schedules_delete
+  AFTER DELETE ON public.schedules
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+-- Create triggers for timerecords table
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_timerecords_insert ON public.timerecords;
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_timerecords_update ON public.timerecords;
+DROP TRIGGER IF EXISTS trigger_calculate_saldo_timerecords_delete ON public.timerecords;
+
+CREATE TRIGGER trigger_calculate_saldo_timerecords_insert
+  AFTER INSERT ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+CREATE TRIGGER trigger_calculate_saldo_timerecords_update
+  AFTER UPDATE ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+CREATE TRIGGER trigger_calculate_saldo_timerecords_delete
+  AFTER DELETE ON public.timerecords
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trigger_calculate_hours_saldo();
+
+-- Grant necessary permissions
+GRANT EXECUTE ON FUNCTION public.calculate_user_hours_saldo(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.trigger_calculate_hours_saldo() TO authenticated;

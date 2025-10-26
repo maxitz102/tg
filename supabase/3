@@ -1,0 +1,55 @@
+-- Add departments table for managing departments and their colors
+CREATE TABLE public.departments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  color_code TEXT NOT NULL, -- Hex color code for the department
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Add department_id to schedules table
+ALTER TABLE public.schedules 
+ADD COLUMN department_id UUID REFERENCES public.departments(id) ON DELETE SET NULL;
+
+-- Add department_id to profiles table
+ALTER TABLE public.profiles 
+ADD COLUMN department_id UUID REFERENCES public.departments(id) ON DELETE SET NULL;
+
+-- Enable RLS on departments table
+ALTER TABLE public.departments ENABLE ROW LEVEL SECURITY;
+
+-- Create RLS policies for departments
+CREATE POLICY "Departments are viewable by everyone" ON public.departments
+  FOR SELECT USING (true);
+
+CREATE POLICY "Only admins can insert departments" ON public.departments
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.user_roles 
+      WHERE user_id = auth.uid() AND role = 'admin'
+    )
+  );
+
+CREATE POLICY "Only admins can update departments" ON public.departments
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM public.user_roles 
+      WHERE user_id = auth.uid() AND role = 'admin'
+    )
+  );
+
+CREATE POLICY "Only admins can delete departments" ON public.departments
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM public.user_roles 
+      WHERE user_id = auth.uid() AND role = 'admin'
+    )
+  );
+
+-- Insert some default departments
+INSERT INTO public.departments (name, color_code) VALUES
+  ('Verkauf', '#FFD700'), -- Gold
+  ('Lager', '#4CAF50'),  -- Green
+  ('Büro', '#2196F3'),   -- Blue
+  ('Service', '#FF9800'), -- Orange
+  ('Management', '#9C27B0'); -- Purple
